@@ -1,0 +1,22 @@
+{
+  "_comment": "Remote-config defaults. Every tunable lives here, nothing hard-coded. Overridden at runtime by a remote fetch.",
+  "grid_size": 7,
+  "tray_size": 3,
+  "clear_threshold": 4,
+  "max_piece_cells": 3,
+  "endless_colours_start": 4,
+  "endless_fifth_colour_after": 40,
+  "zones": [
+    {"name": "teach",      "from_level": 1,  "objective": "any",   "target": 12, "colours": 4, "moves": 12},
+    {"name": "confidence", "from_level": 11, "objective": "colour","target": 20, "colours": 4, "moves": 38},
+    {"name": "engage",     "from_level": 31, "objective": "colour","target": 26, "colours": 5, "moves": 52},
+    {"name": "commit",     "from_level": 81, "objective": "colour","target": 32, "colours": 5, "moves": 59}
+  ],
+  "dda_moves_bonus_after_fails": 2,
+  "dda_moves_bonus_pct": 15,
+  "dda_moves_penalty_pct": 10,
+  "near_miss_progress_pct": 85,
+  "rewarded_extra_moves": 5,
+  "free_rescues_per_level": 1,
+  "interstitial_every_n_levels": 3
+}

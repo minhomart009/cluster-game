@@ -1,0 +1,151 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.6-stable
+  GODOT_TEMPLATE_DIR: 4.6.stable
+
+jobs:
+  # Gate 1 — the game rules. Fast, no Android, no secrets. If the rules break, nothing else runs.
+  rules-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Godot ${{ env.GODOT_VERSION }}
+        run: |
+          curl -sSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv Godot_v${GODOT_VERSION}_linux.x86_64 /usr/local/bin/godot
+          chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Import project
+        run: godot --headless --import || true
+
+      - name: Bot harness must run and the rules must hold
+        run: |
+          set -o pipefail
+          godot --headless --script res://scripts/sim.gd 2>&1 | tee sim.log
+          grep -q "careless" sim.log
+          # Regression guard: a piece must never clear a group by itself (Designer's 3-cell cap).
+          grep -q "self-clears/game=0.00" sim.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sim-log
+          path: sim.log
+
+  # Gate 2 — does an Android build actually come out? Debug keystore only, no release secrets.
+  android-debug:
+    needs: rules-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Fetch Godot and export templates
+        run: |
+          curl -sSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          unzip -q godot.zip
+          sudo mv Godot_v${GODOT_VERSION}_linux.x86_64 /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          curl -sSL -o templates.tpz \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          mkdir -p ~/.local/share/godot/export_templates
+          unzip -q templates.tpz -d /tmp/tpl
+          mv /tmp/tpl/templates "$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_DIR}"
+          ls "$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_DIR}" | head
+
+      - name: Debug keystore (generated here, never committed)
+        run: |
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android \
+            -keystore debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" \
+            -validity 9999 -deststoretype pkcs12
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$PWD/debug.keystore" >> $GITHUB_ENV
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey" >> $GITHUB_ENV
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android" >> $GITHUB_ENV
+
+      - name: Point Godot at the Android SDK
+        run: |
+          godot --headless --editor --quit 2>/dev/null || true
+          SETTINGS=$(find ~/.config/godot -name "editor_settings-*.tres" | head -1)
+          echo "settings file: $SETTINGS"
+          if [ -n "$SETTINGS" ]; then
+            python3 - "$SETTINGS" "$ANDROID_HOME" <<'PY'
+          import sys, re
+          path, sdk = sys.argv[1], sys.argv[2]
+          s = open(path).read()
+          line = f'export/android/android_sdk_path = "{sdk}"\n'
+          if "export/android/android_sdk_path" in s:
+              s = re.sub(r'export/android/android_sdk_path = ".*"\n', line, s)
+          else:
+              s = s.rstrip() + "\n" + line
+          open(path, "w").write(s)
+          print("sdk path set to", sdk)
+          PY
+          fi
+
+      - name: Install the Android build template
+        run: godot --headless --install-android-build-template
+
+      - name: Export debug APK
+        run: |
+          mkdir -p build
+          godot --headless --import || true
+          godot --headless --export-debug "Android" build/cluster-debug.apk
+          ls -lh build/
+
+      - name: Report APK size (low-end budget matters)
+        run: |
+          du -h build/cluster-debug.apk
+          unzip -l build/cluster-debug.apk | tail -3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cluster-debug-apk
+          path: build/cluster-debug.apk
+
+  # Gate 3 — does it launch on an Android 9 device? API 28 = the Owner's Galaxy Note 8.
+  emulator-smoke:
+    needs: android-debug
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cluster-debug-apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot API 28 and launch the app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 28
+          arch: x86_64
+          target: default
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb install -r cluster-debug.apk
+            adb shell monkey -p com.minho.cluster -c android.intent.category.LAUNCHER 1
+            sleep 20
+            adb logcat -d | grep -i -E "godot|AndroidRuntime|FATAL" | tail -40
+            # The app must still be alive after 20s, not crashed on startup.
+            adb shell pidof com.minho.cluster
