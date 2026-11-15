@@ -53,7 +53,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      # The Ubuntu runner already ships an Android SDK. android-actions/setup-android@v3
+      # fails here trying to install the long-obsolete 'tools' package, so we use the
+      # preinstalled SDK and add only the packages Godot's Android export needs.
+      - name: Android SDK packages
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          ls /usr/local/lib/android/sdk
 
       - name: Fetch Godot and export templates
         run: |
