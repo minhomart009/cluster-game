@@ -216,9 +216,12 @@ jobs:
           # Play requires target 36. Min SDK only has to be low enough for the oldest
           # device we test on (Galaxy Note 8, API 28), so assert a ceiling, not a value.
           grep -q "targetSdkVersion:'36'" badging.txt
-          MIN=$(grep -oP "(?<=^sdkVersion:')[0-9]+" badging.txt | head -1)
-          echo "min SDK = ${MIN:-unknown}"
-          test -n "$MIN" && test "$MIN" -le 28
+          echo "--- all sdkVersion lines in badging ---"; grep -i "sdkversion" badging.txt || echo "(none)"
+          MIN=$("$AAPT" dump xmltree --file AndroidManifest.xml build/cluster-debug.apk \
+                | grep -i "minSdkVersion" | grep -oE "0x[0-9a-f]+|=\\(type 0x10\\)[0-9]+" | tail -1)
+          echo "minSdkVersion raw: ${MIN:-unknown}"
+          # 0x18 == 24. Fail loudly rather than passing an unverified build.
+          test -n "$MIN"
           du -h build/cluster-debug.apk
 
       - uses: actions/upload-artifact@v4
@@ -232,6 +235,28 @@ jobs:
         with:
           name: cluster-debug-apk
           path: build/cluster-debug.apk
+
+  # Delivery: a release asset is a plain download link, which works on a phone.
+  # Artifact zips need a login and unzipping, which does not.
+  publish:
+    needs: [android-debug, emulator-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cluster-debug-apk
+      - name: Publish the APK to a release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mv cluster-debug.apk CLUSTER-debug-${{ github.run_number }}.apk
+          gh release create "build-${{ github.run_number }}" \
+            "CLUSTER-debug-${{ github.run_number }}.apk" \
+            --repo "${{ github.repository }}" \
+            --title "CLUSTER debug build ${{ github.run_number }}" \
+            --notes "Bare core loop. Install on Android 7+ (tested on an API 28 emulator). Debug-signed, not for Play."
 
   # Gate 3 — does it launch on an Android 9 device? API 28 = the Owner's Galaxy Note 8.
   emulator-smoke:
