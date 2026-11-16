@@ -129,6 +129,9 @@ jobs:
           mkdir -p android/build
           unzip -q -o "$SRC" -d android/build
           echo "${GODOT_TEMPLATE_DIR}" > android/.build_version
+          # Keep Godot's filesystem out of the 200 MB template tree (it contains its own
+          # project.godot, which the scanner warns about and which slows every run).
+          touch android/.gdignore
           ls android/build | head
           test -f android/build/build.gradle || test -f android/build/settings.gradle
           # Godot 4.6 refuses the export if the preset's target SDK is above the
@@ -153,9 +156,15 @@ jobs:
 
       - name: Export debug APK
         run: |
+          set -o pipefail
           mkdir -p build
+          # Godot needs the project fully imported before it will export anything, and the
+          # first pass only generates the import files. Two passes, then export.
           godot --headless --import || true
-          godot --headless --verbose --export-debug "Android" build/cluster-debug.apk 2>&1 | tail -60
+          godot --headless --import || true
+          godot --headless --verbose --export-debug "Android" build/cluster-debug.apk 2>&1 | tee export.log | tail -40
+          # A pipe must never hide a failed export again: check the artifact itself.
+          test -f build/cluster-debug.apk || { echo "NO APK PRODUCED"; tail -80 export.log; exit 1; }
           ls -lh build/
 
       # Trust nothing: read the SDK levels back out of the APK that was actually built.
