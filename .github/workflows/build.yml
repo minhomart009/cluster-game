@@ -139,10 +139,14 @@ jobs:
           godot --headless --export-debug "Android" build/cluster-debug.apk
           ls -lh build/
 
-      - name: Report APK size (low-end budget matters)
+      # Trust nothing: read the SDK levels back out of the APK that was actually built.
+      - name: Verify the APK's SDK levels and size
         run: |
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
+          "$AAPT" dump badging build/cluster-debug.apk | grep -E "package|sdkVersion|targetSdkVersion|native-code"
+          "$AAPT" dump badging build/cluster-debug.apk | grep -q "targetSdkVersion:'36'"
+          "$AAPT" dump badging build/cluster-debug.apk | grep -q "sdkVersion:'24'"
           du -h build/cluster-debug.apk
-          unzip -l build/cluster-debug.apk | tail -3
 
       - uses: actions/upload-artifact@v4
         with:
