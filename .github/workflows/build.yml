@@ -98,13 +98,24 @@ jobs:
           import sys, re
           path, sdk = sys.argv[1], sys.argv[2]
           s = open(path).read()
-          line = f'export/android/android_sdk_path = "{sdk}"\n'
-          if "export/android/android_sdk_path" in s:
-              s = re.sub(r'export/android/android_sdk_path = ".*"\n', line, s)
-          else:
-              s = s.rstrip() + "\n" + line
+          import os
+          ks = os.environ["GODOT_ANDROID_KEYSTORE_DEBUG_PATH"]
+          wanted = {
+              "export/android/android_sdk_path": sdk,
+              "export/android/debug_keystore": ks,
+              "export/android/debug_keystore_user": "androiddebugkey",
+              "export/android/debug_keystore_pass": "android",
+          }
+          for k, v in wanted.items():
+              line = f'{k} = "{v}"\n'
+              if k in s:
+                  s = re.sub(re.escape(k) + r' = ".*"\n', line, s)
+              else:
+                  s = s.rstrip() + "\n" + line
           open(path, "w").write(s)
-          print("sdk path set to", sdk)
+          for k in wanted:
+              assert k in open(path).read()
+          print("editor settings written:", ", ".join(wanted))
           PY
           fi
 
@@ -144,7 +155,7 @@ jobs:
         run: |
           mkdir -p build
           godot --headless --import || true
-          godot --headless --export-debug "Android" build/cluster-debug.apk
+          godot --headless --verbose --export-debug "Android" build/cluster-debug.apk 2>&1 | tail -60
           ls -lh build/
 
       # Trust nothing: read the SDK levels back out of the APK that was actually built.
