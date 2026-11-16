@@ -48,7 +48,7 @@
   "free_rescues_per_level": 1,
   "interstitial_every_n_levels": 3,
   "banner_enabled": false,
-  "banner_anchor": "top",
+  "banner_anchor": "bottom",
   "banner_height_dp": 50,
   "banner_max_height_dp": 50
-}
+}\n

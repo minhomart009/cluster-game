@@ -179,7 +179,7 @@ jobs:
           # first pass only generates the import files. Two passes, then export.
           godot --headless --import || true
           godot --headless --import || true
-          godot --headless --verbose --export-debug "Android" build/cluster-debug.apk 2>&1 | tee export.log | tail -40
+          godot --headless --verbose --export-release "Android" build/cluster-debug.apk 2>&1 | tee export.log | tail -40
           # A pipe must never hide a failed export again: check the artifact itself.
           test -f build/cluster-debug.apk || { echo "NO APK PRODUCED"; echo "=== full export log ==="; cat export.log; exit 1; }
           ls -lh build/
@@ -256,7 +256,7 @@ jobs:
             "CLUSTER-debug-${{ github.run_number }}.apk" \
             --repo "${{ github.repository }}" \
             --title "CLUSTER debug build ${{ github.run_number }}" \
-            --notes "Bare core loop. Install on Android 7+ (tested on an API 28 emulator). Debug-signed, not for Play."
+            --notes "Bare core loop, RELEASE build (gl_compatibility renderer). Install on Android 7+. Signed with a debug key, so not for Play."
 
   # Gate 3 — does it launch on an Android 9 device? API 28 = the Owner's Galaxy Note 8.
   emulator-smoke:

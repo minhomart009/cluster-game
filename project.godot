@@ -15,4 +15,9 @@ window/handheld/orientation=1
 
 [rendering]
 
+# Godot's own export check warns that forward_plus is a desktop renderer and is not
+# suitable for Android. For a 2D board game on cheap phones, gl_compatibility is the
+# lightest path: lowest requirements, fastest startup, least GPU work per frame.
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true

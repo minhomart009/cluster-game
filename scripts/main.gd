@@ -23,6 +23,10 @@ var drag_pos := Vector2.ZERO
 var board_origin := Vector2.ZERO
 var cell := 0.0
 var tray_slot_w := 0.0
+var score_h := 0.0
+var tray_y := 0.0
+var banner_px := 0.0
+const TRAY_SCALE := 0.62
 var game_over := false
 var placements_this_run := 0
 
@@ -55,25 +59,36 @@ func _dp() -> float:
 
 func _layout() -> void:
 	var vp := get_viewport_rect().size
-	# Safe-area aware: never assume a notchless, 9:16 screen (compatibility requirement).
 	var safe := DisplayServer.get_display_safe_area()
 	var top := 0.0
 	if safe.size.y > 0 and safe.size.y < DisplayServer.screen_get_size().y:
 		top = float(safe.position.y) / float(DisplayServer.screen_get_size().y) * vp.y
-	# The ad banner is anchored at the TOP and is capped (inline adaptive, max 50dp,
-	# or fixed 320x50). Art measured that an uncapped adaptive banner would ask for
-	# 90dp on this screen, which would eat 40dp of board. The board reserves the
-	# capped height and never more, and the value is remote-config, not a literal.
+
+	# Banner is anchored at the BOTTOM (reference game does this), capped at 50dp.
 	var banner_dp: float = 0.0
 	if bool(cfg.get("banner_enabled", false)):
 		banner_dp = min(float(cfg.get("banner_height_dp", 50)), float(cfg.get("banner_max_height_dp", 50)))
-	var banner_px: float = banner_dp * _dp()
+	banner_px = banner_dp * _dp()
+
+	# Five bands, top to bottom: safe area, score, board, tray, banner.
+	# The board takes the middle of the screen and the tray sits directly under it,
+	# with no dead space between them (presentation study, section 2).
 	var size: int = int(cfg.get("grid_size", 7))
-	var usable_w: float = vp.x * 0.92
-	var usable_h: float = (vp.y - banner_px) * 0.60
-	cell = floor(min(usable_w / size, usable_h / size))
+	score_h = vp.y * 0.13
+	var gap := 0.0
+	var tray_h := 0.0
+	var avail_h := 0.0
+	# Tray height depends on cell size, so solve for the cell: board + gap + tray must fit.
+	# tray row is about 2 cells tall at tray scale, gap is half a cell.
+	var h_budget: float = vp.y - top - score_h - banner_px - vp.y * 0.04
+	cell = floor(min(vp.x * 0.94 / size, h_budget / (float(size) + 0.5 + 2.0 * TRAY_SCALE + 0.6)))
+	gap = cell * 0.5
+	tray_h = cell * (2.0 * TRAY_SCALE + 0.6)
+	avail_h = float(size) * cell + gap + tray_h
 	var board_w := cell * size
-	board_origin = Vector2((vp.x - board_w) * 0.5, top + banner_px + (vp.y - banner_px) * 0.12)
+	var free_v: float = vp.y - top - score_h - banner_px - avail_h
+	board_origin = Vector2((vp.x - board_w) * 0.5, top + score_h + max(free_v * 0.35, 0.0))
+	tray_y = board_origin.y + board_w + gap + tray_h * 0.5
 	tray_slot_w = vp.x / float(cfg.get("tray_size", 3))
 
 func _new_run() -> void:
@@ -107,23 +122,38 @@ func _unhandled_input(e: InputEvent) -> void:
 		queue_redraw()
 
 func _tray_hit(pos: Vector2) -> int:
-	var vp := get_viewport_rect().size
-	if pos.y < vp.y - vp.y * 0.22:
+	# Generous hit band around the tray row - thumbs are not precise.
+	if absf(pos.y - tray_y) > cell * 1.6:
 		return -1
 	var i := int(pos.x / tray_slot_w)
 	if i < 0 or i >= tray.size() or tray[i] == null:
 		return -1
 	return i
 
-# Anchor the shape so the cell under the finger is the shape's first cell.
-func _grid_anchor(pos: Vector2) -> Vector2i:
-	var local := pos - board_origin
-	return Vector2i(int(floor(local.x / cell)), int(floor(local.y / cell)))
+# Where the carried piece is actually drawn: centred on the finger horizontally and
+# lifted a clear distance ABOVE it, so the thumb never covers the piece or the cells
+# it is about to land on (presentation study 3.2 - the Owner hit exactly this).
+func _shape_extent(shape: Array) -> Vector2:
+	var w := 0
+	var h := 0
+	for o in shape:
+		w = max(w, int(o.x) + 1)
+		h = max(h, int(o.y) + 1)
+	return Vector2(w, h)
+
+func _lift_origin(pos: Vector2, shape: Array) -> Vector2:
+	var e := _shape_extent(shape)
+	return pos + Vector2(-e.x * cell * 0.5, -e.y * cell - cell * 0.9)
+
+# The piece lands where it is drawn, not where the finger is.
+func _grid_anchor(pos: Vector2, shape: Array) -> Vector2i:
+	var local := _lift_origin(pos, shape) - board_origin
+	return Vector2i(int(round(local.x / cell)), int(round(local.y / cell)))
 
 func _try_drop(pos: Vector2) -> void:
-	var a := _grid_anchor(pos)
 	var e = tray[drag_index]
 	var shape: Array = CR.SHAPES[e.shape_id]
+	var a := _grid_anchor(pos, shape)
 	if not rules.fits(shape, a.x, a.y):
 		return
 	rules.place(shape, e.colour, a.x, a.y)
@@ -207,35 +237,39 @@ func _draw() -> void:
 			draw_rect(r, EMPTY_COLOR if v == CR.EMPTY else PALETTE[v % PALETTE.size()])
 	_draw_ghost()
 	_draw_tray(vp)
-	var txt := "cleared %d   placed %d" % [rules.cleared_total, placements_this_run]
+	var font := ThemeDB.fallback_font
+	var big := int(score_h * 0.62)
+	draw_string(font, Vector2(0, board_origin.y - score_h * 0.18), str(rules.cleared_total),
+		HORIZONTAL_ALIGNMENT_CENTER, vp.x, big, Color(1, 1, 1))
 	if game_over:
-		txt = "no room left — tap to restart"
-	draw_string(ThemeDB.fallback_font, Vector2(24, board_origin.y - 24), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 28)
+		draw_string(font, Vector2(0, tray_y + cell * 1.4), "no room left — tap to restart",
+			HORIZONTAL_ALIGNMENT_CENTER, vp.x, int(cell * 0.42), Color(0.8, 0.82, 0.9))
 
 func _draw_ghost() -> void:
 	if drag_index < 0 or tray[drag_index] == null:
 		return
-	var a := _grid_anchor(drag_pos)
 	var e = tray[drag_index]
 	var shape: Array = CR.SHAPES[e.shape_id]
+	var a := _grid_anchor(drag_pos, shape)
 	var ok: bool = rules.fits(shape, a.x, a.y)
 	var col: Color = PALETTE[e.colour % PALETTE.size()]
 	col.a = 0.45 if ok else 0.15
 	for o in shape:
 		var r := Rect2(board_origin + Vector2(a.x + o.x, a.y + o.y) * cell + Vector2(2, 2), Vector2(cell - 4, cell - 4))
 		draw_rect(r, col)
-	# The carried piece follows the finger at full size.
+	# The carried piece: full board scale, above the finger, fully visible.
+	var lift := _lift_origin(drag_pos, shape)
 	for o in shape:
-		draw_rect(Rect2(drag_pos + Vector2(o.x, o.y) * cell - Vector2(cell * 0.5, cell * 0.5), Vector2(cell - 6, cell - 6)), PALETTE[e.colour % PALETTE.size()])
+		draw_rect(Rect2(lift + Vector2(o.x, o.y) * cell + Vector2(2, 2), Vector2(cell - 4, cell - 4)), PALETTE[e.colour % PALETTE.size()])
 
 func _draw_tray(vp: Vector2) -> void:
-	var base_y := vp.y - vp.y * 0.16
+	var base_y := tray_y
 	for i in tray.size():
 		if tray[i] == null or i == drag_index:
 			continue
 		var e = tray[i]
 		var shape: Array = CR.SHAPES[e.shape_id]
-		var s := cell * 0.55   # small at rest, full size when lifted (presentation study)
+		var s := cell * TRAY_SCALE   # small at rest, full size when lifted (presentation study)
 		var cx := tray_slot_w * (i + 0.5)
 		for o in shape:
 			draw_rect(Rect2(Vector2(cx, base_y) + Vector2(o.x, o.y) * s - Vector2(s * 0.5, s * 0.5), Vector2(s - 4, s - 4)), PALETTE[e.colour % PALETTE.size()])
