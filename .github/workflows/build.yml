@@ -120,17 +120,25 @@ jobs:
           echo "${GODOT_TEMPLATE_DIR}" > android/.build_version
           ls android/build | head
           test -f android/build/build.gradle || test -f android/build/settings.gradle
-          # Godot 4.6 ships this template with compileSdk/targetSdk 35, and refuses the
-          # export outright when the preset asks for a higher target than the template's
-          # default. Google Play requires target API 36 for new apps and every update,
-          # so the template is raised to 36 rather than the app being shipped at 35.
-          CFG=android/build/config.gradle
-          grep -nE "compileSdk|targetSdk|minSdk" "$CFG" | head -5
-          sed -i "s/compileSdk *: *35/compileSdk         : 36/" "$CFG"
-          sed -i "s/targetSdk *: *35/targetSdk          : 36/" "$CFG"
-          echo "--- after ---"
-          grep -nE "compileSdk|targetSdk|minSdk" "$CFG" | head -5
-          grep -q "targetSdk          : 36" "$CFG"
+          # Godot 4.6 refuses the export if the preset's target SDK is above the
+          # engine's own constant (35), and Google Play requires 36 for new apps and
+          # every update. So the preset asks for 35 to satisfy the engine check, and the
+          # build template is pinned to 36 and told to ignore the exported value.
+          # The finished APK is read back afterwards to prove it really is 36.
+          python3 - <<'PYEOF'
+          import re, pathlib
+          p = pathlib.Path("android/build/config.gradle")
+          s = p.read_text()
+          s = s.replace("compileSdk         : 35", "compileSdk         : 36")
+          s = s.replace("targetSdk          : 35", "targetSdk          : 36")
+          s = s.replace("buildTools         : '35.0.1'", "buildTools         : '36.0.0'")
+          s = s.replace(
+              'String targetSdkVersion = project.hasProperty("export_version_target_sdk") ? project.property("export_version_target_sdk") : ""',
+              'String targetSdkVersion = ""  // pinned to versions.targetSdk (36) for Play compliance')
+          p.write_text(s)
+          assert "targetSdk          : 36" in s and "pinned to versions.targetSdk" in s
+          print("template pinned to compileSdk/targetSdk 36, buildTools 36.0.0")
+          PYEOF
 
       - name: Export debug APK
         run: |
