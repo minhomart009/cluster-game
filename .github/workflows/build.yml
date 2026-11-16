@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  GODOT_VERSION: 4.5-stable
-  GODOT_TEMPLATE_DIR: 4.5.stable
+  GODOT_VERSION: 4.6-stable
+  GODOT_TEMPLATE_DIR: 4.6.stable
 
 jobs:
   # Gate 1 — the game rules. Fast, no Android, no secrets. If the rules break, nothing else runs.
