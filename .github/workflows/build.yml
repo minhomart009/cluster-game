@@ -163,7 +163,7 @@ jobs:
           echo "--- sdk root ---"; ls "$ANDROID_HOME"
           echo "--- platform-tools ---"; "$ANDROID_HOME/platform-tools/adb" version | head -2
           echo "--- build-tools ---"; ls "$ANDROID_HOME/build-tools"
-          for bt in "$ANDROID_HOME"/build-tools/*/; do echo "apksigner in $bt:"; "$bt/apksigner" --version 2>&1 | head -1; done
+          for bt in "$ANDROID_HOME"/build-tools/*/; do echo -n "apksigner in $bt: "; "$bt/apksigner" --version 2>&1 | head -1 || true; echo; done
           echo "--- platforms ---"; ls "$ANDROID_HOME/platforms"
           echo "--- cmdline-tools ---"; ls "$ANDROID_HOME/cmdline-tools"
           echo "--- keystore ---"; ls -l debug.keystore
@@ -185,6 +185,29 @@ jobs:
           ls -lh build/
 
       # Trust nothing: read the SDK levels back out of the APK that was actually built.
+      # Godot's export validation asks apksigner for its version; on these runners
+      # apksigner --version prints nothing, which is exactly why the export failed with
+      # an EMPTY configuration error. So Godot exports unsigned and we sign it ourselves.
+      - name: Align and sign the APK ourselves
+        run: |
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/35.0.1 2>/dev/null || ls -d "$ANDROID_HOME"/build-tools/* | tail -1)
+          echo "using build-tools: $BT"
+          "$BT/zipalign" -p -f 4 build/cluster-debug.apk build/aligned.apk
+          if "$BT/apksigner" sign --ks debug.keystore --ks-pass pass:android \
+               --key-pass pass:android --ks-key-alias androiddebugkey \
+               --out build/cluster-signed.apk build/aligned.apk; then
+            echo "signed with apksigner"
+          else
+            echo "apksigner failed, falling back to jarsigner"
+            cp build/aligned.apk build/cluster-signed.apk
+            jarsigner -keystore debug.keystore -storepass android -keypass android \
+              build/cluster-signed.apk androiddebugkey
+          fi
+          mv build/cluster-signed.apk build/cluster-debug.apk
+          rm -f build/aligned.apk
+          "$BT/apksigner" verify --print-certs build/cluster-debug.apk | head -3 || true
+
       - name: Verify the APK's SDK levels and size
         run: |
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
