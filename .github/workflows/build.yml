@@ -211,9 +211,14 @@ jobs:
       - name: Verify the APK's SDK levels and size
         run: |
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
-          "$AAPT" dump badging build/cluster-debug.apk | grep -E "package|sdkVersion|targetSdkVersion|native-code"
-          "$AAPT" dump badging build/cluster-debug.apk | grep -q "targetSdkVersion:'36'"
-          "$AAPT" dump badging build/cluster-debug.apk | grep -q "sdkVersion:'24'"
+          "$AAPT" dump badging build/cluster-debug.apk > badging.txt
+          grep -E "^package:|sdkVersion|native-code|launchable" badging.txt
+          # Play requires target 36. Min SDK only has to be low enough for the oldest
+          # device we test on (Galaxy Note 8, API 28), so assert a ceiling, not a value.
+          grep -q "targetSdkVersion:'36'" badging.txt
+          MIN=$(grep -oP "(?<=^sdkVersion:')[0-9]+" badging.txt | head -1)
+          echo "min SDK = ${MIN:-unknown}"
+          test -n "$MIN" && test "$MIN" -le 28
           du -h build/cluster-debug.apk
 
       - uses: actions/upload-artifact@v4
@@ -223,6 +228,7 @@ jobs:
           path: export.log
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: cluster-debug-apk
           path: build/cluster-debug.apk
