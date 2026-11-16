@@ -154,6 +154,23 @@ jobs:
           print("template pinned to compileSdk/targetSdk 36, buildTools 36.0.0")
           PYEOF
 
+      # One-shot diagnostic: the export fails with an EMPTY configuration-error list,
+      # and the local stub-SDK harness cannot tell us which real check is failing.
+      # Print the environment facts Godot validates, once, instead of guessing.
+      - name: Diagnostics — what Godot is actually validating
+        run: |
+          echo "--- java ---"; java -version 2>&1; echo "JAVA_HOME=$JAVA_HOME"
+          echo "--- sdk root ---"; ls "$ANDROID_HOME"
+          echo "--- platform-tools ---"; "$ANDROID_HOME/platform-tools/adb" version | head -2
+          echo "--- build-tools ---"; ls "$ANDROID_HOME/build-tools"
+          for bt in "$ANDROID_HOME"/build-tools/*/; do echo "apksigner in $bt:"; "$bt/apksigner" --version 2>&1 | head -1; done
+          echo "--- platforms ---"; ls "$ANDROID_HOME/platforms"
+          echo "--- cmdline-tools ---"; ls "$ANDROID_HOME/cmdline-tools"
+          echo "--- keystore ---"; ls -l debug.keystore
+          echo "--- editor settings (export/android lines) ---"
+          grep -n "export/android" "$(find ~/.config/godot -name 'editor_settings-*.tres' | head -1)" || true
+          echo "--- build template ---"; cat android/.build_version 2>/dev/null; ls android/build 2>/dev/null | head -5
+
       - name: Export debug APK
         run: |
           set -o pipefail
@@ -164,7 +181,7 @@ jobs:
           godot --headless --import || true
           godot --headless --verbose --export-debug "Android" build/cluster-debug.apk 2>&1 | tee export.log | tail -40
           # A pipe must never hide a failed export again: check the artifact itself.
-          test -f build/cluster-debug.apk || { echo "NO APK PRODUCED"; tail -80 export.log; exit 1; }
+          test -f build/cluster-debug.apk || { echo "NO APK PRODUCED"; echo "=== full export log ==="; cat export.log; exit 1; }
           ls -lh build/
 
       # Trust nothing: read the SDK levels back out of the APK that was actually built.
@@ -175,6 +192,12 @@ jobs:
           "$AAPT" dump badging build/cluster-debug.apk | grep -q "targetSdkVersion:'36'"
           "$AAPT" dump badging build/cluster-debug.apk | grep -q "sdkVersion:'24'"
           du -h build/cluster-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: export-log
+          path: export.log
 
       - uses: actions/upload-artifact@v4
         with:
