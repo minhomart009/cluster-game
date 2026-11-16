@@ -45,6 +45,14 @@ func _load_config() -> Dictionary:
 	var parsed = JSON.parse_string(f.get_as_text())
 	return parsed if parsed is Dictionary else {}
 
+# One dp in pixels. 160 dpi is the Android baseline; fall back to a mid-range
+# density if the platform reports nothing rather than silently using 1 px per dp.
+func _dp() -> float:
+	var dpi := DisplayServer.screen_get_dpi()
+	if dpi <= 0:
+		return 3.0
+	return float(dpi) / 160.0
+
 func _layout() -> void:
 	var vp := get_viewport_rect().size
 	# Safe-area aware: never assume a notchless, 9:16 screen (compatibility requirement).
@@ -52,12 +60,20 @@ func _layout() -> void:
 	var top := 0.0
 	if safe.size.y > 0 and safe.size.y < DisplayServer.screen_get_size().y:
 		top = float(safe.position.y) / float(DisplayServer.screen_get_size().y) * vp.y
+	# The ad banner is anchored at the TOP and is capped (inline adaptive, max 50dp,
+	# or fixed 320x50). Art measured that an uncapped adaptive banner would ask for
+	# 90dp on this screen, which would eat 40dp of board. The board reserves the
+	# capped height and never more, and the value is remote-config, not a literal.
+	var banner_dp: float = 0.0
+	if bool(cfg.get("banner_enabled", false)):
+		banner_dp = min(float(cfg.get("banner_height_dp", 50)), float(cfg.get("banner_max_height_dp", 50)))
+	var banner_px: float = banner_dp * _dp()
 	var size: int = int(cfg.get("grid_size", 7))
 	var usable_w: float = vp.x * 0.92
-	var usable_h: float = vp.y * 0.60
+	var usable_h: float = (vp.y - banner_px) * 0.60
 	cell = floor(min(usable_w / size, usable_h / size))
 	var board_w := cell * size
-	board_origin = Vector2((vp.x - board_w) * 0.5, top + vp.y * 0.12)
+	board_origin = Vector2((vp.x - board_w) * 0.5, top + banner_px + (vp.y - banner_px) * 0.12)
 	tray_slot_w = vp.x / float(cfg.get("tray_size", 3))
 
 func _new_run() -> void:
