@@ -120,6 +120,17 @@ jobs:
           echo "${GODOT_TEMPLATE_DIR}" > android/.build_version
           ls android/build | head
           test -f android/build/build.gradle || test -f android/build/settings.gradle
+          # Godot 4.6 ships this template with compileSdk/targetSdk 35, and refuses the
+          # export outright when the preset asks for a higher target than the template's
+          # default. Google Play requires target API 36 for new apps and every update,
+          # so the template is raised to 36 rather than the app being shipped at 35.
+          CFG=android/build/config.gradle
+          grep -nE "compileSdk|targetSdk|minSdk" "$CFG" | head -5
+          sed -i "s/compileSdk *: *35/compileSdk         : 36/" "$CFG"
+          sed -i "s/targetSdk *: *35/targetSdk          : 36/" "$CFG"
+          echo "--- after ---"
+          grep -nE "compileSdk|targetSdk|minSdk" "$CFG" | head -5
+          grep -q "targetSdk          : 36" "$CFG"
 
       - name: Export debug APK
         run: |
