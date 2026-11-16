@@ -108,8 +108,18 @@ jobs:
           PY
           fi
 
-      - name: Install the Android build template
-        run: godot --headless --install-android-build-template
+      # `godot --headless --install-android-build-template` hangs with no output
+      # (17 min, no progress, run cancelled). The build template is just a zip inside
+      # the export templates, so unpack it directly - deterministic and nothing to hang on.
+      - name: Install the Android build template (from android_source.zip)
+        run: |
+          SRC="$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_DIR}/android_source.zip"
+          ls -lh "$SRC"
+          mkdir -p android/build
+          unzip -q -o "$SRC" -d android/build
+          echo "${GODOT_TEMPLATE_DIR}" > android/.build_version
+          ls android/build | head
+          test -f android/build/build.gradle || test -f android/build/settings.gradle
 
       - name: Export debug APK
         run: |
