@@ -32,9 +32,13 @@ jobs:
         run: |
           set -o pipefail
           godot --headless --script res://scripts/sim.gd 2>&1 | tee sim.log
-          grep -q "careless" sim.log
-          # Regression guard: a piece must never clear a group by itself (Designer's 3-cell cap).
-          grep -q "self-clears/game=0.00" sim.log
+          # Every generated round must be solvable by construction - the player must
+          # never be handed a shape that cannot be filled.
+          grep -q "RESULT all_rounds_solvable=true" sim.log
+          # Dead-end detection must answer correctly in BOTH directions. This is the
+          # Owner's own bug: a placement that strands the round while the game says
+          # nothing. If this assertion ever fails, that bug is back.
+          grep -q "deadend_check solvable_case=true unsolvable_case=false" sim.log
 
       - uses: actions/upload-artifact@v4
         with:
